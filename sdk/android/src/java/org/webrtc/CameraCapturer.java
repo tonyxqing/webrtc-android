@@ -18,7 +18,7 @@ import java.util.Arrays;
 import java.util.List;
 
 @SuppressWarnings("deprecation")
-abstract class CameraCapturer implements CameraVideoCapturer {
+public abstract class CameraCapturer implements CameraVideoCapturer {
   enum SwitchState {
     IDLE, // No switch requested.
     PENDING, // Waiting for previous capture session to open.
@@ -455,4 +455,16 @@ abstract class CameraCapturer implements CameraVideoCapturer {
       CameraSession.CreateSessionCallback createSessionCallback, CameraSession.Events events,
       Context applicationContext, SurfaceTextureHelper surfaceTextureHelper, String cameraName,
       int width, int height, int framerate);
+
+  public interface SingleCaptureCallBack {
+    void captureSuccess(byte[] jpeg);
+
+    void captureFailed(String error);
+  }
+
+  public void takeSnapshot(CameraCapturer.SingleCaptureCallBack callback, Handler captureHandler) {
+    synchronized (stateLock) {
+      currentSession.processSingleRequest(callback, captureHandler);
+    }
+  }
 }

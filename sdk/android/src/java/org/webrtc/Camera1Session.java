@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit;
 import org.webrtc.CameraEnumerationAndroid.CaptureFormat;
 
 @SuppressWarnings("deprecation")
-class Camera1Session implements CameraSession {
+public class Camera1Session implements CameraSession {
   private static final String TAG = "Camera1Session";
   private static final int NUMBER_OF_CAPTURE_BUFFERS = 3;
 
@@ -48,6 +48,17 @@ class Camera1Session implements CameraSession {
 
   private SessionState state;
   private boolean firstFrameReported;
+
+  @Override
+  public void processSingleRequest(CameraCapturer.SingleCaptureCallBack callback, Handler captureHandler) {
+    camera.takePicture(null, null, new Camera.PictureCallback() {
+      @Override
+      public void onPictureTaken(final byte[] data, Camera camera) {
+        camera.startPreview();
+        captureHandler.post(() -> callback.captureSuccess(data));
+      }
+    });
+  }
 
   // TODO(titovartem) make correct fix during webrtc:9175
   @SuppressWarnings("ByteBufferBackingArray")
