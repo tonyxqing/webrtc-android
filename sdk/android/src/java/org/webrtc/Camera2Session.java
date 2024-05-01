@@ -12,15 +12,23 @@ package org.webrtc;
 
 import android.graphics.ImageFormat;
 import android.content.Context;
-import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
+
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
+import android.hardware.camera2.CameraExtensionCharacteristics;
+import android.hardware.camera2.CameraExtensionSession;
+
+import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CameraMetadata;
+import android.hardware.camera2.CameraOfflineSession;
 import android.hardware.camera2.CaptureFailure;
 import android.hardware.camera2.CaptureRequest;
-import android.hardware.camera2.*;
+import android.hardware.camera2.CaptureResult;
+import android.hardware.camera2.DngCreator;
+import android.hardware.camera2.MultiResolutionImageReader;
+import android.hardware.camera2.TotalCaptureResult;
 import android.media.Image;
 import android.media.ImageReader;
 import android.os.Handler;
@@ -126,9 +134,39 @@ public class Camera2Session implements CameraSession {
 
       surfaceTextureHelper.setTextureSize(captureFormat.width, captureFormat.height);
       surface = new Surface(surfaceTextureHelper.getSurfaceTexture());
+
+      List<Size> sizes = Camera2Enumerator.getSupportedSizes(cameraCharacteristics);
+      Size maxSize = sizes.get(0);
+      // Size maxSize16_9 = null;
+      for (Size s : sizes) {
+        if (s.height * s.width > maxSize.height * maxSize.width) {
+          maxSize = s;
+        }
+
+        /*
+         * if (s.height * 16 == s.width * 9 && (maxSize16_9 == null || s.height *
+         * s.width > maxSize16_9.height * maxSize16_9.width)) {
+         * maxSize16_9 = s;
+         * }
+         */
+      }
+
+      if (imageReader != null) {
+        // dispose it
+        imageReader.close();
+        imageReader = null;
+      }
+
+      /*
+       * if (maxSize16_9 != null)
+       * this.imageReader = ImageReader.newInstance(maxSize16_9.width,
+       * maxSize16_9.height, ImageFormat.JPEG, 1);
+       * else
+       */
+      imageReader = ImageReader.newInstance(maxSize.width, maxSize.height, ImageFormat.JPEG, 2);
       try {
         camera.createCaptureSession(
-            Arrays.asList(surface), new CaptureSessionCallback(), cameraThreadHandler);
+            Arrays.asList(surface, imageReader.getSurface()), new CaptureSessionCallback(), cameraThreadHandler);
       } catch (CameraAccessException e) {
         reportError("Failed to create capture session. " + e);
         return;
@@ -282,38 +320,6 @@ public class Camera2Session implements CameraSession {
         cameraId, width, height, framerate);
   }
 
-  private void initImageReader() {
-    List<Size> sizes = Camera2Enumerator.getSupportedSizes(cameraCharacteristics);
-    Size maxSize = sizes.get(0);
-    // Size maxSize16_9 = null;
-    for (Size s : sizes) {
-      if (s.height * s.width > maxSize.height * maxSize.width) {
-        maxSize = s;
-      }
-
-      /*
-       * if (s.height * 16 == s.width * 9 && (maxSize16_9 == null || s.height *
-       * s.width > maxSize16_9.height * maxSize16_9.width)) {
-       * maxSize16_9 = s;
-       * }
-       */
-    }
-
-    if (this.imageReader != null) {
-      // dispose it
-      this.imageReader.close();
-      this.imageReader = null;
-    }
-
-    /*
-     * if (maxSize16_9 != null)
-     * this.imageReader = ImageReader.newInstance(maxSize16_9.width,
-     * maxSize16_9.height, ImageFormat.JPEG, 1);
-     * else
-     */
-    this.imageReader = ImageReader.newInstance(maxSize.width, maxSize.height, ImageFormat.JPEG, 1);
-  }
-
   private Camera2Session(CreateSessionCallback callback, Events events, Context applicationContext,
       CameraManager cameraManager, SurfaceTextureHelper surfaceTextureHelper, String cameraId,
       int width, int height, int framerate) {
@@ -358,9 +364,6 @@ public class Camera2Session implements CameraSession {
     }
 
     openCamera();
-
-    // FIXME: to avoid camera switching and invalid imageReader issue
-    initImageReader();
   }
 
   private void findCaptureFormat() {
@@ -472,9 +475,7 @@ public class Camera2Session implements CameraSession {
     try {
       final CaptureRequest.Builder captureRequestBuilder = cameraDevice
           .createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
-
-      captureRequestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
-      captureRequestBuilder.set(CaptureRequest.CONTROL_AE_LOCK, false);
+      captureRequestBuilder.addTarget(surface);
       captureRequestBuilder.addTarget(imageReader.getSurface());
 
       final ImageReader imgR = this.imageReader;
@@ -494,6 +495,7 @@ public class Camera2Session implements CameraSession {
             byte[] imageBytes = new byte[buffer.remaining()];
             buffer.get(imageBytes);
             captureCallback.captureSuccess(imageBytes);
+            image.close();
           } catch (Exception e) {
             Logging.d(TAG, "SNAPSHOT: Image acquire/conversion failed, due to" + e.toString());
             if (image != null) {
@@ -516,7 +518,7 @@ public class Camera2Session implements CameraSession {
           Logging.d(TAG, "SNAPSHOT: capture failed due to" + failure.toString());
           captureHandler.post(() -> captureCallback.captureFailed(failure.toString()));
         }
-      }, null); // capture as in current thread
+      }, cameraThreadHandler); // capture as in current thread
     } catch (CameraAccessException e) {
       Logging.e(TAG, "SNAPSHOT: failed due to" + e.getReason() + ":" + e.getMessage());
       // reportError(Failed to start capture request. + e);
